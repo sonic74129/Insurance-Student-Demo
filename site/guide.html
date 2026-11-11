@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>學生保障 Marketplace 操作說明書</title>
+  <link rel="stylesheet" href="styles.css">
+  <script defer src="student.js"></script>
+  <style>
+    main { max-width: 900px; margin: 24px auto; padding: 24px; border: 1px solid var(--line); border-radius: 12px; background: var(--paper); }
+    main > p, #walkthrough li { line-height: 1.7; }
+    #walkthrough { display: grid; gap: 12px; padding-left: 24px; }
+    #walkthrough li { padding-left: 5px; }
+    #walkthrough strong, #walkthrough span { display: block; }
+    #walkthrough span { color: var(--muted); }
+    @media (max-width: 940px) { main { margin: 16px; padding: 18px; } }
+    @media (max-width: 560px) { main { margin: 10px; padding: 14px; } }
+  </style>
+</head>
+<body>
+  <header class="site-header"><a class="brand" href="index.html#/login">學生保障 Marketplace 操作說明書</a><a class="button" href="index.html#/login">返回角色入口</a></header>
+  <main>
+    <h1>開始使用</h1>
+    <p>從此獨立學生平台入口開始，選擇學生／家長、保險公司、政府監管或學校。角色僅供演示，不是真實登入。</p>
+    <h2>七步角色操作指南</h2>
+    <ol id="walkthrough"></ol>
+    <h2>手機操作</h2>
+    <p>同一平台會依螢幕寬度調整：角色卡直向排列，導航換行，商品以卡片瀏覽；展開商品條款查看來源。手機一次最多勾選兩款比較，其餘商品仍可查看或申請。桌面保留多款完整商品比較。旋轉螢幕不會清除商品選擇或指南步驟。</p>
+    <p>指南在手機以底部步驟卡顯示；點全螢幕按鈕閱讀，按 Esc 或退出按鈕返回。帶路只會定位及高亮目標，不會自動切換角色、填表或提交。瀏覽器縮放仍可使用。</p>
+    <h2>本機資料與保障邊界</h2>
+    <p>學生醫保是基礎政策入口，需向所在地權威渠道核實資格、辦理、適用期和待遇；學平險是多家公司的自願商業補充，須查正式條款。並非全國統一強制。所有地區、產品、政策和角色操作均為合成示例；沒有真實核驗、報價、承保、理賠或支付。學校端和學生端存檔獨立，瀏覽器間不會自動同步。請勿輸入身份、病歷、學籍、真實監護或支付資料。</p>
+    <p>頁尾「重置學生端演示資料」會在確認後清除本機學生端合成紀錄，不影響學校平台。固定演示日期為 2026-10-25。</p>
+  </main>
+  <script>
+    window.addEventListener("DOMContentLoaded", () => {
+      const list = document.querySelector("#walkthrough");
+      const steps = window.StudentInsuranceDemo?.WALKTHROUGH || [];
+      for (const step of steps) {
+        const item = document.createElement("li");
+        const title = document.createElement("strong");
+        const body = document.createElement("span");
+        const done = document.createElement("span");
+        title.textContent = `${window.StudentInsuranceDemo.ROLE_LABELS[step.role]}：${step.title}`;
+        body.textContent = step.text;
+        done.textContent = `完成標誌：${step.done}`;
+        item.append(title, body, done);
+        list.append(item);
+      }
+    });
+  </script>
+</body>
+</html>
