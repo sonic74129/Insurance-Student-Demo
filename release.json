@@ -1,16 +1,16 @@
 {
-  "generated_at_utc": "2026-11-11T22:19:52+00:00",
+  "generated_at_utc": "2026-11-11T22:22:44+00:00",
   "source": {
     "repository": "sonic74129/Insurance-School",
     "branch": "sonic74129-student-insurance-mvp",
     "base_commit": "940b3151fb0462668cd7ee9e71de021e20bc66cb",
     "worktree_dirty": true,
-    "note": "Public runtime contains only the four allowlisted synthetic student assets; hashes identify the exact export from this source state."
+    "note": "Hashes identify the committed runtime asset bytes served by Pages after Git line-ending normalization; the source worktree was dirty at export."
   },
   "assets_sha256": {
-    "site/index.html": "32667d724fd60e0f0f5192a270a59a4a9d62d96261382732c1df329c0ab456a5",
-    "site/styles.css": "3c66aa9297177abc3608948e36db63e0c1afcd1b4bb360d0bb8bd24ed51da2fc",
-    "site/student.js": "89c41cdad363023fef12a2d6d874f523e02a11c1ccbe1dd40eb6131998e32f72",
-    "site/guide.html": "6b040cb9bbbef90d5a7a6cfdf9d9a7dc310a87dcb456b4f7dcdd208297d39873"
+    "site/index.html": "18658969195ac6c6b98c497b126f50519a5f6821f78a1b25e57687aa1f3cd70f",
+    "site/styles.css": "51ec1eb93a531f1b561aeaece4464165888ad65013004eee663ec9bd2803fb3a",
+    "site/student.js": "6e1b6db21a2e11905f0645558d71d07d3ee1bb2439388bc947ce90db52fb0d9f",
+    "site/guide.html": "22de1e7fed95af38b4026195d9ebb8a8066e0ec7be5fa49bcc9879a6dece4d01"
   }
 }
