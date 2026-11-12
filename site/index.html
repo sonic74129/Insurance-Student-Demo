@@ -17,6 +17,18 @@
   </header>
 
   <div id="app-error" class="notice notice-danger" role="alert" hidden></div>
+  <div id="student-storage-recovery" class="notice" hidden>
+    <h2>安全保留與恢復學生端存檔</h2>
+    <p>目前存檔仍保留在此瀏覽器，尚未修改。先下載原始備份；備份可能含本機演示進度，請勿公開分享。</p>
+    <p id="student-storage-diagnostics" class="muted" role="status"></p>
+    <button id="export-student-storage" class="button secondary" type="button">下載原始學生端存檔備份</button>
+    <button id="export-student-diagnostics" class="button secondary" type="button">下載脫敏診斷檔</button>
+    <label class="checkline"><input id="confirm-student-backup" type="checkbox">我已將原始存檔備份保存到本機，確認後才恢復。</label>
+    <label class="field">選擇先前匯出的學生端 JSON 備份<input id="import-student-backup" type="file" accept=".json,application/json"></label>
+    <button id="restore-student-backup" class="button" type="button" disabled>驗證並恢復備份</button>
+    <p id="student-recovery-status" role="status" aria-live="polite"></p>
+    <p>未知格式會保持原樣。若備份仍無法驗證，請保留原始備份與脫敏診斷檔，經專案維護者提供的私密支援管道聯絡；不要公開貼出存檔內容。</p>
+  </div>
   <div id="app" aria-live="polite"></div>
   <div id="guide-pointer" class="guide-pointer" hidden aria-hidden="true"></div>
   <button id="guide-launcher" class="guide-launcher" type="button" data-action="reopen-guide" aria-expanded="false" aria-controls="student-guide" hidden>操作說明書 <span id="guide-launcher-step">第 1/7 步</span> · 展開</button>

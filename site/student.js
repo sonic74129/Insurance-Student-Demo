@@ -42,7 +42,7 @@
     published: "已演示發布",
     withdrawn: "已撤出演示發布",
   };
-  const LEGACY_PRODUCT_IDS = { "STU-ACC-01": "SYN-PROD-001", "STU-ACC-02": "SYN-PROD-002" };
+  const LEGACY_PRODUCT_IDS = { "STU-ACC-01": "SYN-PROD-101", "STU-ACC-02": "SYN-PROD-102" };
   const LEGACY_INSURER_IDS = {
     "合成保險機構甲": "SYN-INSURER-A", "合成保險機構乙": "SYN-INSURER-B",
     "演示保險機構甲": "SYN-INSURER-A", "演示保險機構乙": "SYN-INSURER-B",
@@ -64,8 +64,10 @@
     },
   ];
   function migrateLegacyProduct(row) {
-    const seed = LEGACY_PRODUCT_SEED.find(item => item.id === row.id && item.insurer === row.insurer);
-    if (!seed) return null;
+    const insurer = LEGACY_INSURER_IDS[row?.insurer];
+    const seed = LEGACY_PRODUCT_SEED.find(item =>
+      item.id === row?.id && LEGACY_INSURER_IDS[item.insurer] === insurer);
+    if (!seed || !insurer) return null;
     const { limit, ...legacyFields } = seed;
     const { limit: savedLegacyLimit, ...savedFields } = row;
     const state = row.published ? "published" : "withdrawn";
@@ -73,7 +75,8 @@
       ...legacyFields,
       ...savedFields,
       id: LEGACY_PRODUCT_IDS[row.id],
-      insurer: LEGACY_INSURER_IDS[row.insurer],
+      legacyId: row.id,
+      insurer,
       limitAmount: seed.id === "STU-ACC-01" ? 20000 : 50000,
       limitUnit: "元/人",
       feeAmount: seed.id === "STU-ACC-01" ? 68 : 128,
@@ -105,9 +108,18 @@
       revisionOf: fields.revisionOf || null,
     };
   }
+  function makeSeedProduct(row) {
+    const fields = { ...migrateLegacyProduct(row) };
+    delete fields.legacyId;
+    return makeProduct({
+      ...fields,
+      id: { "STU-ACC-01": "SYN-PROD-001", "STU-ACC-02": "SYN-PROD-002" }[row.id],
+      reviewHistory: undefined,
+    });
+  }
   const PRODUCT_SEED = [
-    makeProduct({ ...migrateLegacyProduct(LEGACY_PRODUCT_SEED[0]), reviewHistory: undefined }),
-    makeProduct({ ...migrateLegacyProduct(LEGACY_PRODUCT_SEED[1]), reviewHistory: undefined }),
+    makeSeedProduct(LEGACY_PRODUCT_SEED[0]),
+    makeSeedProduct(LEGACY_PRODUCT_SEED[1]),
     makeProduct({
       id: "SYN-PROD-003", insurer: "SYN-INSURER-A", name: "意外保障示例方案A-2",
       benefit: "責任類別示例：意外傷害、意外醫療；完整責任以合成條款摘要為準。",
@@ -174,6 +186,8 @@
     "2026-05", "2026-06", "2026-07", "2026-08", "2026-09", "2026-10",
   ];
   const AGE_BANDS = ["未滿14歲（合成測試分組）", "14-17歲（合成測試分組）", "18+（合成測試分組）"];
+  const LEGACY_MINOR_AGE_BAND = "未滿18歲（舊版合成分組）";
+  const LEGACY_ADULT_AGE_BANDS = ["18歲以上", AGE_BANDS[2]];
   const APPLICATION_STATES = [
     "pending-underwriting", "supplement-requested", "resubmitted",
     "approved-awaiting-payment", "rejected", "paid-effective", "legacy-existing",
@@ -458,6 +472,7 @@
       policies,
       claims: makeSeedClaims(policies),
       samplePolicies: [],
+      legacyHistory: { policies: [], claims: [] },
       policyPresentation: { status: "合成政策指引占位；待當地權威來源確認", source: "未接入真實主管機關資料" },
       schoolBriefing: { reviewed: false, source: "僅固定合成示例；未實際發送" },
     };
@@ -477,6 +492,7 @@
         typeof row.source !== "string" || !Array.isArray(row.coverageTypes) ||
         !row.coverageTypes.every(value => COVERAGE_TYPES.includes(value))) return false;
     if (row.id && !/^SYN-PROD-\d{3,}$/.test(row.id)) return false;
+    if (row.legacyId !== undefined && LEGACY_PRODUCT_IDS[row.legacyId] !== row.id) return false;
     if (!INSURERS.includes(row.insurer) || !PRODUCT_STATES.includes(row.status) ||
         row.published !== (row.status === "published") ||
         !Number.isInteger(row.versionNumber) || row.versionNumber < 1) return false;
@@ -502,8 +518,10 @@
       new Set(rows.map(row => row.id)).size === rows.length;
     const profiles = db.profiles, guardians = db.guardians, products = db.products;
     if (!uniqueIds(profiles) || profiles.some(row =>
-      !row || typeof row !== "object" || !/^SYN-STU-\d{4}$/.test(row.id) || !/^演示學生[A-D]-\d{3}$/.test(row.displayName) ||
-      !AGE_BANDS.includes(row.ageBand) || !SCHOOL_SEED.includes(row.schoolId) ||
+      !row || typeof row !== "object" || !/^SYN-STU-(?:\d{4}|LEGACY-\d{3})$/.test(row.id) ||
+      !/^(?:演示學生[A-D]-\d{3}|演示學生舊版-\d{3})$/.test(row.displayName) ||
+      !(AGE_BANDS.includes(row.ageBand) || row.ageBand === LEGACY_MINOR_AGE_BAND) ||
+      !SCHOOL_SEED.includes(row.schoolId) ||
       !/^SYN-COHORT-\d{2}$/.test(row.cohortId) || !REGIONS.some(region => region.id === row.regionId) ||
       !(row.guardianId === null || /^SYN-GUARDIAN-\d{4}$/.test(row.guardianId)))) errors.push("學生合成測試標記無效");
     if (!uniqueIds(guardians) || guardians.some(row =>
@@ -532,7 +550,9 @@
           !products.some(candidate => candidate.id === app.productId &&
             JSON.stringify(productSnapshot(candidate)) === JSON.stringify(app.productSnapshot)) ||
         (!legacy && app.consent !== true) ||
-        (legacy && typeof app.legacyStatus !== "string") ||
+        (legacy && (typeof app.legacyStatus !== "string" ||
+          (app.legacyId !== undefined &&
+            (typeof app.legacyId !== "string" || !app.legacyId.startsWith("SYN-APP-"))))) ||
         !Array.isArray(app.requestedSupplementIds) || !Array.isArray(app.submittedSupplementIds);
     })) errors.push("申請或核保紀錄包含無效狀態、版本或參照");
     if (!uniqueIds(db.policies) || db.policies.some(policy => {
@@ -561,20 +581,109 @@
     })) errors.push("演示理賠紀錄狀態或有效保單參照無效");
     if (!uniqueIds(db.samplePolicies) || db.samplePolicies.some(row =>
       !row || typeof row !== "object" || row.status !== "legacy-not-effective" || row.effectiveDemo !== false ||
+      (row.legacyId !== undefined &&
+        (typeof row.legacyId !== "string" || !row.legacyId.startsWith("SYN-POL-"))) ||
+      (row.legacyApplicationId !== undefined &&
+        (typeof row.legacyApplicationId !== "string" || !row.legacyApplicationId.startsWith("SYN-APP-"))) ||
       !db.applications.some(app => app?.id === row.applicationId && app.status === "legacy-existing"))) errors.push("舊版樣例保單不得表示為有效保障");
     if (!db.policyPresentation || typeof db.policyPresentation.status !== "string" ||
         typeof db.policyPresentation.source !== "string" ||
         !db.schoolBriefing || typeof db.schoolBriefing.reviewed !== "boolean" ||
         db.schoolBriefing.source !== "僅固定合成示例；未實際發送") errors.push("政策或學校通知資料無效");
+    if (db.legacyHistory !== undefined &&
+        (!db.legacyHistory || !Array.isArray(db.legacyHistory.policies) ||
+          !Array.isArray(db.legacyHistory.claims) ||
+          [...db.legacyHistory.policies, ...db.legacyHistory.claims].some(row =>
+            !row || typeof row.id !== "string" || !row.id.startsWith("SYN-") ||
+            (row.legacyId !== undefined &&
+              (typeof row.legacyId !== "string" || !row.legacyId.startsWith("SYN-"))) ||
+            typeof row.status !== "string") ||
+          [...db.legacyHistory.policies, ...db.legacyHistory.claims].some(row =>
+            row.profileId !== null && row.profileId !== undefined &&
+            !db.profiles.some(profile => profile.id === row.profileId)))
+      ) errors.push("舊版演示歷史格式無效");
     return errors;
   }
+  function diagnoseSave(raw) {
+    let db;
+    try {
+      db = JSON.parse(raw);
+    } catch {
+      return {
+        readableJson: false, schemaVersion: null, syntheticMarker: null,
+        businessDateMatches: false, scenarioMatches: false, migrationValid: false,
+        validationReason: "JSON 格式無法讀取",
+      };
+    }
+    if (!db || typeof db !== "object" || Array.isArray(db)) {
+      return {
+        readableJson: true, schemaVersion: null, syntheticMarker: null,
+        businessDateMatches: false, scenarioMatches: false, migrationValid: false,
+        validationReason: "存檔根節點不是資料物件",
+      };
+    }
+    let migrated;
+    try {
+      migrated = migrate(db);
+    } catch {
+      migrated = db;
+    }
+    const errors = validate(migrated);
+    return {
+      readableJson: true,
+      schemaVersion: Number.isInteger(db.schemaVersion) ? db.schemaVersion : null,
+      syntheticMarker: db.meta?.synthetic === true,
+      businessDateMatches: db.meta?.businessDate === BUSINESS_DATE,
+      scenarioMatches: db.meta?.scenario === "student-insurance-demo",
+      scenarioMissing: db.meta?.scenario === undefined,
+      migrationValid: errors.length === 0,
+      validationReason: errors[0] || "",
+    };
+  }
   function migrate(db) {
-    if (db?.schemaVersion === 3) return db;
+    if (db?.schemaVersion === 3) {
+      if (db.meta?.synthetic !== true ||
+          ![undefined, "student-insurance-demo"].includes(db.meta?.scenario)) return db;
+      const currentMarkers = clone(db);
+      currentMarkers.meta = {
+        ...currentMarkers.meta,
+        businessDate: BUSINESS_DATE,
+        scenario: "student-insurance-demo",
+      };
+      return validate(currentMarkers).length ? db : currentMarkers;
+    }
     if (![1, 2].includes(db?.schemaVersion) || db.meta?.synthetic !== true ||
-        db.meta.scenario !== "student-insurance-demo" ||
-        !Array.isArray(db.profiles) || !Array.isArray(db.guardians) ||
-        !Array.isArray(db.applications) || !Array.isArray(db.samplePolicies)) return db;
-    if (Array.isArray(db.products) && db.products.some(row => !migrateLegacyProduct(row))) return db;
+        (db.meta.scenario && db.meta.scenario !== "student-insurance-demo") ||
+        !Array.isArray(db.profiles) || !db.profiles.length ||
+        !Array.isArray(db.guardians) || !Array.isArray(db.applications) ||
+        (db.samplePolicies !== undefined && !Array.isArray(db.samplePolicies)) ||
+        (db.policies !== undefined && !Array.isArray(db.policies)) ||
+        (db.claims !== undefined && !Array.isArray(db.claims)) ||
+        db.profiles.some(profile => !profile || !(
+          ["SYN-STU-ADULT", "SYN-STU-MINOR"].includes(profile.id) ||
+          /^SYN-STU-\d{4}$/.test(profile.id)
+        ) || !["未滿18歲", "18歲以上", LEGACY_MINOR_AGE_BAND, ...AGE_BANDS].includes(profile.ageBand)) ||
+        db.guardians.some(guardian => !guardian || !/^SYN-GUARDIAN-(?:\d{2}|\d{4})$/.test(guardian.id)) ||
+        db.profiles.some(profile => !LEGACY_ADULT_AGE_BANDS.includes(profile.ageBand) &&
+          (!profile.guardianId || !db.guardians.some(guardian =>
+            guardian.id === profile.guardianId && guardian.studentId === profile.id &&
+            typeof guardian.active === "boolean"))) ||
+        db.applications.some(app => !app || typeof app.id !== "string" ||
+          !app.id.startsWith("SYN-APP-") || !db.profiles.some(profile => profile.id === app.profileId) ||
+          !(LEGACY_PRODUCT_IDS[app.productId] || PRODUCT_SEED.some(row => row.id === app.productId)) ||
+          !["已送出演示申請", "演示處理完成（非承保）", "pending-underwriting",
+            "supplement-requested", "resubmitted", "approved-awaiting-payment",
+            "rejected", "paid-effective", "legacy-existing"].includes(app.status)) ||
+        (db.samplePolicies || []).some(policy => !policy || typeof policy.id !== "string" ||
+          !policy.id.startsWith("SYN-POL-") ||
+          !db.applications.some(app => app.id === policy.applicationId)) ||
+        (db.policies || []).some(policy => !policy || typeof policy.id !== "string" ||
+          !policy.id.startsWith("SYN-POL-") || typeof policy.status !== "string") ||
+        (db.claims || []).some(claim => !claim || typeof claim.id !== "string" ||
+          !claim.id.startsWith("SYN-CLAIM-") || typeof claim.status !== "string" ||
+          !db.profiles.some(profile => profile.id === claim.profileId))) return db;
+    if (Array.isArray(db.products) && db.products.some(row =>
+      !migrateLegacyProduct(row) && !PRODUCT_SEED.some(seed => seed.id === row?.id && seed.insurer === row?.insurer))) return db;
     const next = createSeed();
     const regionMap = { "SYN-R1": "SYN-REGION-A", "SYN-R2": "SYN-REGION-B", "SYN-R3": "SYN-REGION-C" };
     next.context = {
@@ -585,33 +694,70 @@
     if (Array.isArray(db.products)) {
       for (const oldProduct of db.products) {
         const migrated = migrateLegacyProduct(oldProduct);
-        const index = next.products.findIndex(row => row.id === migrated.id);
-        next.products[index] = makeProduct(migrated);
+        const currentId = migrated?.id || oldProduct.id;
+        const index = next.products.findIndex(row => row.id === currentId);
+        if (migrated) {
+          // Keep the historical contract separate from current seed products and their snapshots.
+          if (index >= 0) return db;
+          next.products.push(makeProduct(migrated));
+        } else {
+          if (index < 0) return db;
+          const previous = next.products[index];
+          const state = oldProduct.published === true || oldProduct.status === "published"
+            ? "published" : "withdrawn";
+          next.products[index] = makeProduct({
+            ...previous, status: state, published: state === "published",
+            reviewNote: "舊存檔發布狀態已保留為演示目錄狀態；非真實批准。",
+            reviewHistory: [{ status: state, date: BUSINESS_DATE, note: "舊存檔相容遷移。" }],
+          });
+        }
       }
     }
     const profileMap = new Map();
+    let guardianOrdinal = next.guardians.reduce((max, row) =>
+      Math.max(max, Number(/^SYN-GUARDIAN-(\d+)$/.exec(row.id)?.[1]) || 0), 0);
     db.profiles.forEach((profile, index) => {
-      const target = profile.id === "SYN-STU-ADULT" || profile.ageBand === "18歲以上"
-        ? PROFILE_SEED[0] : PROFILE_SEED[index % (PROFILE_SEED.length - 1) + 1];
-      profileMap.set(profile.id, target.id);
-      if (target.guardianId && db.guardians.some(guardian =>
-        guardian.studentId === profile.id && guardian.active === false)) {
-        const guardian = next.guardians.find(row => row.id === target.guardianId);
-        if (guardian) guardian.active = false;
+      if (profile.id === "SYN-STU-ADULT" || LEGACY_ADULT_AGE_BANDS.includes(profile.ageBand)) {
+        profileMap.set(profile.id, PROFILE_SEED[0].id);
+        return;
       }
+      const base = PROFILE_SEED[index % (PROFILE_SEED.length - 1) + 1];
+      const oldGuardian = db.guardians.find(row =>
+        row.id === profile.guardianId && row.studentId === profile.id);
+      if (!oldGuardian) return;
+      let guardianId;
+      do {
+        guardianOrdinal += 1;
+        guardianId = `SYN-GUARDIAN-${String(guardianOrdinal).padStart(4, "0")}`;
+      } while (next.guardians.some(row => row.id === guardianId));
+      const profileId = `SYN-STU-LEGACY-${String(index + 1).padStart(3, "0")}`;
+      next.profiles.push({
+        ...base,
+        id: profileId,
+        displayName: `演示學生舊版-${String(index + 1).padStart(3, "0")}`,
+        ageBand: profile.ageBand === "未滿18歲" ? LEGACY_MINOR_AGE_BAND : profile.ageBand,
+        guardianId,
+      });
+      next.guardians.push({
+        id: guardianId, studentId: profileId, active: oldGuardian.active,
+        relationshipCode: "舊版合成代理關係",
+      });
+      profileMap.set(profile.id, profileId);
     });
     const appMap = new Map();
     const legacyApplications = db.applications.map((oldApp, index) => {
-      const plan = next.products.find(row => row.id === LEGACY_PRODUCT_IDS[oldApp.productId]);
+      const currentProductId = LEGACY_PRODUCT_IDS[oldApp.productId] || oldApp.productId;
+      const plan = next.products.find(row => row.id === currentProductId);
       const profileId = profileMap.get(oldApp.profileId);
       if (!plan || !profileId) return null;
       const id = `SYN-APP-LEGACY-${String(index + 1).padStart(4, "0")}`;
       appMap.set(oldApp.id, id);
       const profile = next.profiles.find(row => row.id === profileId);
+      const oldStatus = String(oldApp.legacyStatus || oldApp.status || "舊版演示紀錄");
       return {
-        id, profileId, productId: plan.id, productSnapshot: productSnapshot(plan),
+        id, legacyId: oldApp.id, profileId, productId: plan.id, productSnapshot: productSnapshot(plan),
         productVersion: plan.version, assignedUnderwriterId: nextInsurer(plan.insurer),
-        status: "legacy-existing", legacyStatus: String(oldApp.status || "舊版演示紀錄"),
+        status: "legacy-existing", legacyStatus: oldStatus,
         consent: null, createdMonth: "2026-10", regionId: profile.regionId,
         schoolYear: next.context.schoolYear, source: "舊版本機演示紀錄（僅保留，不計入核保）",
         requestedSupplementIds: [], submittedSupplementIds: [], underwritingDecision: null,
@@ -620,12 +766,29 @@
     });
     if (legacyApplications.some(row => !row)) return db;
     next.applications.push(...legacyApplications);
-    next.samplePolicies = db.samplePolicies.map((oldPolicy, index) => ({
-      id: `SYN-POL-LEGACY-${String(index + 1).padStart(4, "0")}`,
+    next.samplePolicies = (db.samplePolicies || []).map((oldPolicy, index) => ({
+      id: oldPolicy.id,
+      legacyId: oldPolicy.id,
+      legacyApplicationId: oldPolicy.applicationId,
       applicationId: appMap.get(oldPolicy.applicationId),
       status: "legacy-not-effective", effectiveDemo: false,
       legacyStatus: String(oldPolicy.status || "舊版樣例保單"),
     })).filter(row => row.applicationId);
+    next.legacyHistory = {
+      policies: (db.policies || []).map((row, index) => ({
+        id: `SYN-POL-LEGACY-${String(index + 1).padStart(4, "0")}`,
+        legacyId: row.id,
+        profileId: profileMap.get(row.profileId ||
+          db.applications.find(app => app.id === row.applicationId)?.profileId) || null,
+        status: String(row.legacyStatus || row.status || "舊版保單紀錄（未驗證）"),
+      })),
+      claims: (db.claims || []).map((row, index) => ({
+        id: `SYN-CLAIM-LEGACY-${String(index + 1).padStart(4, "0")}`,
+        legacyId: row.id,
+        profileId: profileMap.get(row.profileId),
+        status: String(row.legacyStatus || row.status || "舊版理賠紀錄（未驗證）"),
+      })),
+    };
     next.schoolBriefing.reviewed = db.schoolBriefing?.reviewed === true;
     return next;
   }
@@ -949,6 +1112,7 @@
     }
     return `<article class="workflow-card" data-application="${esc(app.id)}"><div class="workflow-card-heading"><div><span class="tag">${esc(applicationStatusLabel(app.status))}</span><h3>${esc(app.id)}｜${esc(snapshot.name)}</h3></div><span class="muted">${esc(app.createdMonth)}</span></div>
       <p class="muted">${mode === "underwriting" ? `${syntheticPerson}・` : ""}${esc(insurerLabel(snapshot.insurer))}・條款 ${esc(app.productVersion || snapshot.version)}</p>
+      ${app.status === "legacy-existing" ? `<p class="status-strip">舊版狀態已保留：${esc(app.legacyStatus)}</p>` : ""}
       <p>${esc(snapshot.benefit)}</p>${app.underwritingDecision?.note ? `<p class="muted">演示狀態說明：${esc(app.underwritingDecision.note)}</p>` : ""}
       ${policy ? `<p class="status-strip">演示保單 ${esc(policy.id)}｜模擬繳費 ${esc(policy.payment.status)}｜不是實際生效保障</p>` : ""}
       ${actions ? `<div class="workflow-actions">${actions}</div>` : ""}</article>`;
@@ -999,6 +1163,8 @@
     const records = db.applications.filter(row => row.profileId === profileId);
     const policies = db.policies.filter(row => row.profileId === profileId);
     const claims = db.claims.filter(row => row.profileId === profileId);
+    const legacyPolicies = (db.legacyHistory?.policies || []).filter(row => row.profileId === profileId);
+    const legacyClaims = (db.legacyHistory?.claims || []).filter(row => row.profileId === profileId);
     const compared = products.filter(row => compareProductIds.includes(row.id));
     const profile = db.profiles.find(row => row.id === profileId);
     const guardian = db.guardians.find(row => row.id === profile?.guardianId && row.active);
@@ -1018,10 +1184,11 @@
         <div class="compare-results" data-compare-results aria-live="polite">${renderComparison(compared)}</div>
       </section>
       <section class="panel"><h2>我的演示申請與核保狀態</h2>${records.length ? records.map(app => applicationCard(db, app, "student")).join("") : "<p>此合成身份目前沒有演示申請。</p>"}<p class="muted">申請不等於承保；核保通過仍須模擬繳費後才建立「演示保單」。</p></section>
-      <section class="panel"><h2>我的演示保單</h2>${policies.length ? policies.map(row => `<article class="workflow-card"><span class="tag">模擬繳費完成・演示有效（非真實保障）</span><h3>${esc(row.id)}｜${esc(row.productSnapshot.name)}</h3><p>${esc(insurerLabel(row.insurer))}｜條款 ${esc(row.productSnapshot.version)}｜費用示例 ${row.payment.amount} 演示元</p><p>${esc(row.productSnapshot.benefit)}</p><p class="muted">存檔狀態來源：本機演示；不是實際支付或生效保單。</p></article>`).join("") : "<p>尚無演示保單；需先完成模擬核保與模擬繳費。</p>"}</section>
+      <section class="panel"><h2>我的演示保單</h2>${policies.length ? policies.map(row => `<article class="workflow-card"><span class="tag">模擬繳費完成・演示有效（非真實保障）</span><h3>${esc(row.id)}｜${esc(row.productSnapshot.name)}</h3><p>${esc(insurerLabel(row.insurer))}｜條款 ${esc(row.productSnapshot.version)}｜費用示例 ${row.payment.amount} 演示元</p><p>${esc(row.productSnapshot.benefit)}</p><p class="muted">存檔狀態來源：本機演示；不是實際支付或生效保單。</p></article>`).join("") : "<p>尚無演示保單；需先完成模擬核保與模擬繳費。</p>"}${legacyPolicies.length ? `<div class="workflow-card"><h3>舊版保單歷史（只讀）</h3>${legacyPolicies.map(row => `<p>${esc(row.id)}｜${esc(row.status)}（保留原狀態，不表示有效保障）</p>`).join("")}</div>` : ""}</section>
       <section class="panel" id="claim-flow"><h2>學平險演示理賠</h2><p>只為已模擬繳費的演示保單提供流程操作；事故使用抽象類別與月份，材料僅為清單勾選，不可上傳文件。</p>
         ${policies.length ? `<form class="workflow-form" data-claim-form><label class="field">演示保單<select name="policyId" required>${policies.map(row => `<option value="${esc(row.id)}">${esc(row.id)}｜${esc(row.productSnapshot.name)}</option>`).join("")}</select></label><label class="field">抽象責任類別<select name="category">${COVERAGE_TYPES.map(value => `<option>${esc(value)}</option>`).join("")}</select></label><label class="field">合成事故月份<select name="eventMonth">${monthOptions}</select></label><label class="field">聲稱金額（演示元）<input name="claimedAmount" type="number" min="1" max="1000000" step="1" value="500" required></label><button class="button" type="button" data-action="submit-claim">建立演示報案</button><p class="muted">不填事故敘事、診斷或個人資料；此流程不是正式理賠申請。</p></form>` : "<p>只有演示保單存在時，才可進入模擬理賠流程。</p>"}
-        ${claims.length ? claims.map(row => claimCard(db, row, "student")).join("") : "<p>此合成身份尚無演示理賠記錄。</p>"}</section>`;
+        ${claims.length ? claims.map(row => claimCard(db, row, "student")).join("") : "<p>此合成身份尚無演示理賠記錄。</p>"}
+        ${legacyClaims.length ? `<div class="workflow-card"><h3>舊版理賠歷史（只讀）</h3>${legacyClaims.map(row => `<p>${esc(row.id)}｜${esc(row.status)}（保留原狀態，不代表有效理賠）</p>`).join("")}</div>` : ""}</section>`;
   }
   function productEditor(row) {
     const editable = ["draft", "returned"].includes(row.status);
@@ -1210,6 +1377,14 @@
   }
   function init() {
     const root = document.querySelector("#app"), errorBox = document.querySelector("#app-error");
+    const recoveryBox = document.querySelector("#student-storage-recovery");
+    const exportBackup = document.querySelector("#export-student-storage");
+    const exportDiagnostics = document.querySelector("#export-student-diagnostics");
+    const diagnosticsView = document.querySelector("#student-storage-diagnostics");
+    const recoveryStatus = document.querySelector("#student-recovery-status");
+    const recoveryFile = document.querySelector("#import-student-backup");
+    const restoreButton = document.querySelector("#restore-student-backup");
+    const backupConfirmation = document.querySelector("#confirm-student-backup");
     const guide = document.querySelector("#student-guide");
     const guideBody = document.querySelector("#guide-body");
     const guideProgress = document.querySelector("#guide-progress");
@@ -1229,12 +1404,114 @@
     let reportFilters = { regionId: "all", schoolYear: "all", month: "all", insurerId: "all" };
     let guideOpen = false;
     let guideReturnFocus = null;
+    let recoverySourceRaw = null;
+    let recoveryDiagnostic = null;
+    let recoveryCandidate = null;
     document.querySelector("#guide-step-select").innerHTML = WALKTHROUGH
       .map((step, index) => `<option value="${index}">${index + 1}. ${esc(step.title)}</option>`).join("");
 
     function showError(message) {
       errorBox.hidden = false;
       errorBox.textContent = message;
+    }
+    function showStorageRecovery(message) {
+      showError(message);
+      recoveryBox.hidden = false;
+      document.querySelectorAll('[data-action="reset"]').forEach(button => { button.hidden = true; });
+      recoverySourceRaw = global.localStorage.getItem(STORAGE_KEY);
+      recoveryDiagnostic = diagnoseSave(recoverySourceRaw || "");
+      const diagnosis = recoveryDiagnostic;
+      diagnosticsView.textContent = [
+        `存檔結構診斷（不含業務內容）：JSON ${diagnosis.readableJson ? "可讀" : "無法解析"}`,
+        `schemaVersion ${diagnosis.schemaVersion ?? "未識別"}`,
+        `合成標記 ${diagnosis.syntheticMarker === null ? "無法判讀" : diagnosis.syntheticMarker ? "符合" : "不符"}`,
+        `演示日期 ${diagnosis.businessDateMatches ? "符合" : "不符／缺少"}`,
+        `scenario ${diagnosis.scenarioMatches ? "符合" : diagnosis.scenarioMissing ? "缺少" : "不符"}`,
+        `遷移後驗證 ${diagnosis.migrationValid ? "通過" : `未通過：${diagnosis.validationReason}`}`,
+      ].join("；");
+      recoveryStatus.textContent = "尚未恢復任何檔案。下載原始備份後，可選擇其他已匯出的 JSON 存檔進行本機驗證。";
+    }
+    function downloadText(contents, filename, type) {
+      const blob = new Blob([contents], { type });
+      const url = global.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      link.click();
+      global.setTimeout(() => global.URL.revokeObjectURL(url), 0);
+    }
+    function downloadOriginalSave() {
+      const original = global.localStorage.getItem(STORAGE_KEY);
+      if (original === null) return showError("找不到學生端存檔；沒有資料被更改。");
+      downloadText(original, `student-demo-local-storage-backup-${BUSINESS_DATE}.json`,
+        "application/json;charset=utf-8");
+    }
+    function downloadSafeDiagnostics() {
+      if (!recoveryDiagnostic) return;
+      downloadText(JSON.stringify({
+        product: "student-insurance-demo",
+        storageKey: STORAGE_KEY,
+        ...recoveryDiagnostic,
+      }, null, 2), `student-demo-recovery-diagnostics-${BUSINESS_DATE}.json`,
+      "application/json;charset=utf-8");
+    }
+    function validateRecoveryFile(file) {
+      recoveryCandidate = null;
+      restoreButton.disabled = true;
+      if (!file) return;
+      if (file.size > 5 * 1024 * 1024) {
+        recoveryStatus.textContent = "備份超過 5 MiB，已拒絕讀取；原存檔未變更。";
+        return;
+      }
+      file.text().then(text => {
+        let candidate;
+        try {
+          candidate = migrate(JSON.parse(text));
+        } catch {
+          recoveryStatus.textContent = "此檔案不是可解析的演示存檔；原存檔未變更。";
+          return;
+        }
+        const errors = validate(candidate);
+        if (errors.length) {
+          const diagnosis = diagnoseSave(text);
+          recoveryStatus.textContent =
+            `檔案未通過安全驗證（schemaVersion ${diagnosis.schemaVersion ?? "未識別"}；${errors[0]}）；原存檔未變更。請保留備份及脫敏診斷檔，交由專案維護者私下確認。`;
+          return;
+        }
+        const normalized = JSON.stringify(candidate);
+        recoveryCandidate = { data: candidate, serialized: normalized, migrated: normalized !== text };
+        restoreButton.disabled = !backupConfirmation.checked;
+        const count = ["applications", "policies", "claims"].map(key =>
+          `${key} ${candidate[key].length}`).join("、");
+        recoveryStatus.textContent =
+          `檔案驗證通過；${count}。${recoveryCandidate.migrated ? "將先轉換為目前 schema 再恢復。" : "可恢復目前版本存檔。"}請先下載並確認原始備份。`;
+      }).catch(() => {
+        recoveryStatus.textContent = "讀取備份失敗；原存檔未變更。";
+      });
+    }
+    function restoreValidatedBackup() {
+      if (!backupConfirmation.checked || !recoveryCandidate || recoverySourceRaw === null) {
+        recoveryStatus.textContent = "請先下載原始備份、勾選確認並選擇通過驗證的檔案。";
+        return;
+      }
+      if (global.localStorage.getItem(STORAGE_KEY) !== recoverySourceRaw) {
+        recoveryStatus.textContent = "目前瀏覽器存檔已改變，為避免覆蓋其他分頁的更新，恢復已取消；請重新載入後再檢查。";
+        return;
+      }
+      const errors = validate(recoveryCandidate.data);
+      if (errors.length) {
+        recoveryCandidate = null;
+        restoreButton.disabled = true;
+        recoveryStatus.textContent = `恢復前二次驗證失敗（${errors[0]}）；原存檔未變更。`;
+        return;
+      }
+      try {
+        global.localStorage.setItem(STORAGE_KEY, recoveryCandidate.serialized);
+      } catch {
+        recoveryStatus.textContent = "瀏覽器未能保存恢復結果；原存檔未變更。請先保留原始備份與診斷檔。";
+        return;
+      }
+      global.location.reload();
     }
     function draw() {
       if (currentRole === "student-parent" && !canManageProfile(db, profileId)) profileId = "SYN-STU-0001";
@@ -1467,6 +1744,13 @@
     document.addEventListener("click", event => {
       if (event.target.closest('[data-action="reset"]')) resetStudentDemo();
     });
+    exportBackup.addEventListener("click", downloadOriginalSave);
+    exportDiagnostics.addEventListener("click", downloadSafeDiagnostics);
+    recoveryFile.addEventListener("change", () => validateRecoveryFile(recoveryFile.files?.[0]));
+    backupConfirmation.addEventListener("change", () => {
+      restoreButton.disabled = !backupConfirmation.checked || !recoveryCandidate;
+    });
+    restoreButton.addEventListener("click", restoreValidatedBackup);
     const saved = global.localStorage.getItem(STORAGE_KEY);
     if (saved === null) {
       db = createSeed();
@@ -1475,10 +1759,10 @@
       try {
         db = migrate(JSON.parse(saved));
       } catch {
-        return showError("學生端存檔格式損壞，為避免覆蓋資料，本頁不會自動重置。請確認後使用學生端專用重置。");
+        return showStorageRecovery("學生端存檔格式無法讀取，原始存檔仍未更動；請先下載備份。平台不會自動重置或覆蓋資料。");
       }
       const errors = validate(db);
-      if (errors.length) return showError(`學生端存檔驗證失敗（${errors[0]}），為避免覆蓋資料，本頁不會自動重置。`);
+      if (errors.length) return showStorageRecovery(`學生端存檔驗證／遷移未通過（${errors[0]}）。原始存檔仍未更動；請先下載備份。平台不會自動重置或覆蓋資料。`);
       global.localStorage.setItem(STORAGE_KEY, JSON.stringify(db));
     }
     global.addEventListener("hashchange", applyRoute);
